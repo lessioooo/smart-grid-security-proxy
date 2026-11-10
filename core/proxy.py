@@ -32,7 +32,7 @@ def connection_handler(client_socket, address):
         if not valida_regola_fisica(azione, valore):
             print(f"[!] BLOCCO ANOMALIA: Violazione limiti fisici (Azione: {azione}, Valore: {valore}).") # controllo su regole fisiche
             return
-        print(f"[+] Pacchetto da {mittente} sicuro. Aperta connessione verso il Simulatore.")
+        print(f"[+] Pacchetto da {mittente} sicuro. Aperta connessione verso il plant.")
         # creo un nuovo socket per parlare con il plant sulla porta 5001
         simulatore_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
         simulatore_socket.connect((HOST, PORT + 1))
@@ -72,13 +72,13 @@ def start_nids():
 
         while True: 
             client_socket, address = server_socket.accept() # programma si blocca fino a quando non arriva una connessione in entrata
-            print(f"[*] Connection received from {address}")
+            print(f"[*] Connessione ricevuta da {address}")
             thread = threading.Thread(target=connection_handler, args=(client_socket, address)) #creazione e avvuio del thread per gestire la connessione in entrata
             thread.start()
-            print(f"[*] Active connections: {threading.active_count() - 1}")
+            print(f"[*] Connessioni attive: {threading.active_count() - 1}")
 
     except KeyboardInterrupt:
-        print("\n[!] Shutting down NIDS...") # così con ctrl+c si chiude il programma senza errori
+        print("\n[!] Chiusura del NIDS...") # così con ctrl+c si chiude il programma senza errori
     finally:
         server_socket.close()   
 
