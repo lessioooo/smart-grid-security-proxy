@@ -10,8 +10,11 @@ REGOLE_ELETTRICHE = {
     "SET_ACTIVE_POWER": (0, 500),
     "TRIP_BREAKER": (0, 1)
 }
+NODI_INTOCCABILI = {"targetProva"}
+AZIONI_BANNATE = {"TRIP_BREAKER", "SHUTDOWN_GENERATOR", "DISCONNECT_NODE", "DISABLE_PROTECTION", "SET_MAINTENANCE_MODE"}
 
-def refresh_banned_ips():
+
+def refresh_banned_ips(): # funzione che aggiorna la lista di IP bannati da Emerging Threats ogni 24 ore
     while True:
         try:
             url = "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt" # usa lista di ip bannati di Emerging Threats
@@ -29,10 +32,10 @@ def refresh_banned_ips():
         time.sleep(86400)
     
   # Aggiorna ogni 24 ore
-def is_ip_banned(ip):
+def is_ip_banned(ip): # controlla se l'IP è bannato
     return ip in IP_BANNATI
 
-def load_dinamic_signatures():
+def load_dinamic_signatures(): # funzione che carica le firme malevole da fonti esterne
 
     print("[*] Caricamento firme malevole dinamiche...")
     url_minacce = [
@@ -67,11 +70,11 @@ def load_dinamic_signatures():
     else:
         print(f"[*] Caricamento firme malevole completato. Totale firme caricate: {len(FIRME_MALEVOLE)}")
         
-def is_payload_malicious(valore):
+def is_payload_malicious(valore): # controlla se il payload contiene firme malevole
     valore_str = str(valore).upper()
     return any(firma.upper() in valore_str for firma in FIRME_MALEVOLE)
 
-def valida_regola_fisica(azione, valore): 
+def valida_regola_fisica(azione, valore): # controlla se il valore è compreso tra i limiti consentiti per l'azione specificata
     limit_consentiti = REGOLE_ELETTRICHE.get(azione)
 
     if limit_consentiti is None: # l'azione non è riconosciuta, comando illegittimo
@@ -88,3 +91,8 @@ def valida_regola_fisica(azione, valore):
         return True # tutto ok
     else:
         return False  # valore anomalo
+
+def is_azione_bannata(azione,target): # controlla se l'azione è bannata e se il target è un nodo intoccabile, contemporaneamente
+    if azione in AZIONI_BANNATE and target in NODI_INTOCCABILI:
+        return True
+    return False

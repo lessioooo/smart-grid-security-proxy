@@ -1,7 +1,7 @@
 import socket
 import threading
 import json
-from security_engine import IP_BANNATI, FIRME_MALEVOLE, REGOLE_ELETTRICHE, is_ip_banned, is_payload_malicious, valida_regola_fisica, load_dinamic_signatures, refresh_banned_ips 
+from security_engine import IP_BANNATI, FIRME_MALEVOLE, REGOLE_ELETTRICHE, is_ip_banned, is_payload_malicious, valida_regola_fisica, load_dinamic_signatures, refresh_banned_ips, is_azione_bannata
 HOST = '127.0.0.1'
 PORT = 5000
 
@@ -20,17 +20,25 @@ def connection_handler(client_socket, address):
 
         mittente = json_data.get("mittente", "Sconosciuto")
         ip_simulato = json_data.get("ip_simulato", ip_source)
-        azione = json_data.get("azione", "")
-        valore = json_data.get("valore", "")
+        azione = json_data.get("azione", "nessuna")
+        valore = json_data.get("valore", "0")
+        target = json_data.get("target", "Sconosciuto")   
 
         if is_ip_banned(ip_simulato):
             print(f"[!] Connessione da IP bannato: {ip_simulato}. Connessione terminata.") # controllo su ip
+            client_socket.sendall(f"[!] Connessione da IP bannato: {ip_simulato}. Connessione terminata.".encode('utf-8'))
             return
         if is_payload_malicious(valore):
             print(f"[!] Payload malevolo rilevato da {ip_simulato}. Connessione terminata.") # controllo su payload
+            client_socket.sendall(f"[!] Payload malevolo rilevato da {ip_simulato}. Connessione terminata.".encode('utf-8'))
             return
         if not valida_regola_fisica(azione, valore):
             print(f"[!] BLOCCO ANOMALIA: Violazione limiti fisici (Azione: {azione}, Valore: {valore}).") # controllo su regole fisiche
+            client_socket.sendall(f"[!] BLOCCO ANOMALIA: Violazione limiti fisici (Azione: {azione}, Valore: {valore}).".encode('utf-8'))
+            return
+        if is_azione_bannata(azione, target):
+            print(f"[!] Tentativo di azione bannata (Azione: {azione}, Target: {target}).") # controllo su azioni bannate
+            client_socket.sendall(f"[!] Tentativo di azione bannata (Azione: {azione}, Target: {target}).".encode('utf-8'))
             return
         print(f"[+] Pacchetto da {mittente} sicuro. Aperta connessione verso il plant.")
         # creo un nuovo socket per parlare con il plant sulla porta 5001
