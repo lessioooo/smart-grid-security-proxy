@@ -15,7 +15,7 @@ def invia_richieste(giri):
     inviati = 0
     rifiutati = 0
     timeouts = 0
-    errori = 0              # NUOVO: conta gli errori imprevisti (es. porte esaurite)
+    errori = 0
     i = 0
     while i < giri:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -23,25 +23,28 @@ def invia_richieste(giri):
         try:
             sock.connect((HOST, PORT))
             sock.sendall(dati)
+            sock.recv(1024)      # NUOVO: aspetta la risposta del server (max 5 secondi)
             inviati = inviati + 1
         except ConnectionRefusedError:
             rifiutati = rifiutati + 1
         except socket.timeout:
             timeouts = timeouts + 1
-        except OSError:     # NUOVO: cattura tutti gli altri errori di rete. Va per ULTIMO
+        except OSError as e:     # NUOVO: "as e" salva l'errore per poterlo stampare
             errori = errori + 1
+            if errori == 1:
+                print("Primo errore:", e)
         sock.close()
         i = i + 1
-    return inviati, rifiutati, timeouts, errori   # MODIFICATO: ora restituisce 4 valori
+    return inviati, rifiutati, timeouts, errori
 
 
 def lavoratore(numero, giri, risultati):
     risultati[numero] = invia_richieste(giri)
-    print("Thread", numero, "finito")
+    print("Thread " + str(numero) + " finito\n", end="")   # NUOVO: evita le righe sovrapposte
 
 
-NUM_THREAD = 20   # quanti client contemporanei
-GIRI = 50        # quante richieste fa ciascun client
+NUM_THREAD = 25   # quanti client contemporanei
+GIRI = 5         # quante richieste fa ciascun client
 
 risultati = [None] * NUM_THREAD
 thread = []
@@ -61,19 +64,19 @@ durata = time.time() - inizio
 inviati = 0
 rifiutati = 0
 timeouts = 0
-errori = 0                  # NUOVO
+errori = 0
 for r in risultati:
     inviati = inviati + r[0]
     rifiutati = rifiutati + r[1]
     timeouts = timeouts + r[2]
-    errori = errori + r[3]  # NUOVO
-totale = inviati + rifiutati + timeouts + errori   # MODIFICATO
+    errori = errori + r[3]
+totale = inviati + rifiutati + timeouts + errori
 
 print("Thread:", NUM_THREAD)
 print("Inviati:", inviati)
 print("Rifiutati:", rifiutati)
 print("Timeout:", timeouts)
-print("Altri errori:", errori)   # NUOVO
+print("Altri errori:", errori)
 print("Durata (secondi):", durata)
 print("Totale tentativi:", totale)
 print("Richieste al secondo:", totale / durata)

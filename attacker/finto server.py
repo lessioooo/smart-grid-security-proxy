@@ -1,4 +1,5 @@
 import socket
+import time   # NUOVO: serve per la pausa che simula l'elaborazione
 
 HOST = "127.0.0.1"
 PORT = 5000
@@ -21,6 +22,8 @@ while True:
     try:
         conn.settimeout(2)
         dati = conn.recv(4096)
+        time.sleep(0.2)        # simula 200 ms di elaborazione
+        conn.sendall(b"OK\n")   # NUOVO: risponde al client
         ricevuti = ricevuti + 1
         if ricevuti % 100 == 0:
             print("Ricevuti:", ricevuti, "Errori:", errori)
