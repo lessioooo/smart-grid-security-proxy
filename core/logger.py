@@ -37,7 +37,6 @@ def log_allarme(ip_sorgente, target, azione, motivo):
             if con:
                 con.close()
 
-if __name__ == "__main__":
-    init_db()
-    print("[*] Database SQLite inizializzato con successo in 'nids_log.db'")
-
+# In fondo a logger.py
+init_db()
+print("[*] Motore SQLite inizializzato (Tabella 'allarmi' pronta).")
