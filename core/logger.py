@@ -6,7 +6,7 @@ from datetime import datetime
 def init_db():
     con = sqlite3.connect('nids_log.db')
     cur = con.cursor()
-    cur.execute(""""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS allarmi(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,

@@ -8,7 +8,10 @@ data = {
     "target" : "targetProva",
     "azione" : "TRIP_BREAKER",
     "valore" : "0",
-    "ip_simulato" : "185.15.2.1"
+    "ip_simulato" : "185.15.2.1",   
+    "timestamp" : "1731581400.0",
+    "seq" : 1,
+    "firma" : "firmaProva"
 }
 
 payload_bites = json.dumps(data).encode('utf-8')

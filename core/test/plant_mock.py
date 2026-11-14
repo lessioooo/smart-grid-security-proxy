@@ -10,7 +10,7 @@ socket_plant.listen(5)
 
 while True: 
     connessione, indirizzo = socket_plant.accept()
-    risposta =connessione.recv(1024)
+    risposta = connessione.recv(1024)
     print(f"[+] Pacchetto ricevuto dal proxy: {risposta.decode('utf-8')}.")
     connessione.sendall(b"Risposta dal plant: Pacchetto ricevuto correttamente.")
     connessione.close()
