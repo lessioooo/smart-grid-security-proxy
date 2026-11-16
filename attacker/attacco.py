@@ -1,82 +1,104 @@
-import socket #contiene tutto per la comunicazione di rete.
-import json #serve a trasformare un dizionario Python in testo JSON
-import time
-import threading # serve per far girare più client contemporaneamente
-HOST = "127.0.0.1"#l’indirizzo del server, come stringa (quindi tra virgolette). Il nostro è 127.0.0.1
-PORT = 5000 #la porta, come numero intero (senza virgolette). La nostra è 5000
+"""
+LOAD TEST - collaudo di carico sul proxy NIDS (127.0.0.1:5000)
 
-messaggio = {"mittente": "tester", "target": "nodo1", "azione": "lettura", "valore": "10"} #messaggio è il nome della scatola, le parole a sinistra sono le etichette, quelle a destra poi le cambio so test per mo
-testo = json.dumps(messaggio) + "\n" #trasforma il testo in Jsone poi va a capo con la n
-print(testo) #lo stampa
-dati = testo.encode("utf-8") #trasforma il testo in byte
-print(dati) #stampa uguale a prima ma con una b di byte
+Apre NUM_THREAD client simultanei, ognuno manda GIRI richieste JSON valide
+al proxy, e misura quante vengono accettate, bloccate (rate limiting /
+anomalia), rifiutate o scadute per timeout.
+"""
+
+import socket
+import json
+import time
+import threading
+
+HOST = "127.0.0.1"
+PORT = 5000
+
+# Messaggio valido secondo le REGOLE_ELETTRICHE del proxy
+# (SET_VOLTAGE accetta un valore tra 18000 e 22000)
+MESSAGGIO = {"mittente": "tester", "target": "nodo1", "azione": "SET_VOLTAGE", "valore": "20000"}
+DATI = (json.dumps(MESSAGGIO) + "\n").encode("utf-8")
+
+# Impostazioni del test: cambia questi due numeri per variare il carico
+NUM_THREAD = 5
+GIRI = 10
+
 
 def invia_richieste(giri):
-    inviati = 0
-    rifiutati = 0
-    timeouts = 0
-    errori = 0
-    i = 0
-    while i < giri:
+    """
+    Esegue 'giri' connessioni in sequenza verso il proxy.
+    Ritorna una tupla con il conteggio di ogni possibile esito.
+    """
+    inviati = 0     # richiesta accettata davvero dal sistema
+    bloccati = 0    # risposta con "rifiutata" (rate limiting) o "BLOCCO" (anomalia)
+    rifiutati = 0   # connessione TCP rifiutata (nessuno in ascolto)
+    timeouts = 0    # nessuna risposta entro il timeout
+    errori = 0      # altri errori di rete (es. porte esaurite)
+
+    for _ in range(giri):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         try:
             sock.connect((HOST, PORT))
-            sock.sendall(dati)
-            sock.recv(1024)      # NUOVO: aspetta la risposta del server (max 5 secondi)
-            inviati = inviati + 1
+            sock.sendall(DATI)
+            risposta = sock.recv(1024)
+            if b"rifiutata" in risposta or b"BLOCCO" in risposta:
+                bloccati += 1
+            else:
+                inviati += 1
         except ConnectionRefusedError:
-            rifiutati = rifiutati + 1
+            rifiutati += 1
         except socket.timeout:
-            timeouts = timeouts + 1
-        except OSError as e:     # NUOVO: "as e" salva l'errore per poterlo stampare
-            errori = errori + 1
-            if errori == 1:
-                print("Primo errore:", e)
-        sock.close()
-        i = i + 1
-    return inviati, rifiutati, timeouts, errori
+            timeouts += 1
+        except OSError:
+            errori += 1
+        finally:
+            sock.close()
+
+    return inviati, bloccati, rifiutati, timeouts, errori
 
 
 def lavoratore(numero, giri, risultati):
+    """Eseguito da ogni thread: chiama invia_richieste e salva il risultato."""
     risultati[numero] = invia_richieste(giri)
-    print("Thread " + str(numero) + " finito\n", end="")   # NUOVO: evita le righe sovrapposte
 
 
-NUM_THREAD = 25   # quanti client contemporanei
-GIRI = 5         # quante richieste fa ciascun client
+def main():
+    risultati = [None] * NUM_THREAD
+    thread = []
 
-risultati = [None] * NUM_THREAD
-thread = []
+    print(f"[*] Avvio load test: {NUM_THREAD} thread x {GIRI} richieste = {NUM_THREAD * GIRI} totali")
+    inizio = time.time()
 
-inizio = time.time()
+    for n in range(NUM_THREAD):
+        t = threading.Thread(target=lavoratore, args=(n, GIRI, risultati))
+        t.start()
+        thread.append(t)
 
-for n in range(NUM_THREAD):
-    t = threading.Thread(target=lavoratore, args=(n, GIRI, risultati))
-    t.start()
-    thread.append(t)
+    for t in thread:
+        t.join()
 
-for t in thread:
-    t.join()
+    durata = time.time() - inizio
 
-durata = time.time() - inizio
+    inviati = sum(r[0] for r in risultati)
+    bloccati = sum(r[1] for r in risultati)
+    rifiutati = sum(r[2] for r in risultati)
+    timeouts = sum(r[3] for r in risultati)
+    errori = sum(r[4] for r in risultati)
+    totale = inviati + bloccati + rifiutati + timeouts + errori
 
-inviati = 0
-rifiutati = 0
-timeouts = 0
-errori = 0
-for r in risultati:
-    inviati = inviati + r[0]
-    rifiutati = rifiutati + r[1]
-    timeouts = timeouts + r[2]
-    errori = errori + r[3]
-totale = inviati + rifiutati + timeouts + errori
+    print("\n===== REPORT LOAD TEST =====")
+    print(f"Thread                : {NUM_THREAD}")
+    print(f"Totale tentativi      : {totale}")
+    print(f"  Inviati (accettati) : {inviati}")
+    print(f"  Bloccati (rate limit/anomalia): {bloccati}")
+    print(f"  Rifiutati (TCP)     : {rifiutati}")
+    print(f"  Timeout             : {timeouts}")
+    print(f"  Altri errori        : {errori}")
+    print(f"Durata (secondi)      : {durata:.3f}")
+    if durata > 0:
+        print(f"Richieste al secondo  : {totale / durata:.1f}")
 
-print("Thread:", NUM_THREAD)
-print("Inviati:", inviati)
-print("Rifiutati:", rifiutati)
-print("Timeout:", timeouts)
-print("Altri errori:", errori)
-print("Durata (secondi):", durata)
-print("Totale tentativi:", totale)
-print("Richieste al secondo:", totale / durata)
+
+if __name__ == "__main__":
+    main()
