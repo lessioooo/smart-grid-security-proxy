@@ -2,7 +2,7 @@ import socket
 import threading
 import json
 import time
-from security_engine import IP_BANNATI, FIRME_MALEVOLE, REGOLE_ELETTRICHE, is_ip_banned, is_payload_malicious, valida_regola_fisica, load_dinamic_signatures, refresh_banned_ips, is_azione_bannata
+from security_engine import IP_BANNATI, FIRME_MALEVOLE, REGOLE_ELETTRICHE, is_ip_banned, is_payload_malicious, valida_regola_fisica, load_dinamic_signatures, refresh_banned_ips, is_azione_bannata, is_pacchetto_autentico
 from logger import log_allarme
 HOST = '127.0.0.1'
 PORT = 5000
@@ -14,59 +14,97 @@ def connection_handler(client_socket, address):
     print(f"[*] Connessione stabilita con {ip_source}")
 
     try: 
-        dati_grezzi = client_socket.recv(1024)
+        dati_grezzi = client_socket.recv(4096)
 
         if not dati_grezzi:
             return
 
         data = dati_grezzi.decode('utf-8')
-        json_data = json.loads(data)
-        # estraggo i campi dal JSON ricevuto, con valori di default se non presenti
-        mittente = json_data.get("mittente", "Sconosciuto")
-        ip_simulato = json_data.get("ip_simulato", ip_source)
-        azione = json_data.get("azione", "nessuna")
-        valore = json_data.get("valore", "0")
-        target = json_data.get("target", "Sconosciuto")  
-
         tempo_attuale = time.time()
-        if ip_simulato in IP_TRACKER: # controllo se l'IP che cerca di connettersi supera il limite di connessioni per secondo
-            if tempo_attuale- IP_TRACKER[ip_simulato] < RATE_LIMIT:
-                print(f"[!] Connessione da {ip_simulato} rifiutata per rate limiting.")
-                log_allarme(ip_simulato, "N/A", "N/A", "Rate limiting")  # Log dell'evento di rate limiting
+        ultimo_accesso = IP_TRACKER.get(ip_source, 0) # Prende l'ultimo accesso, o 0 se è la prima volta
+        IP_TRACKER[ip_source] = tempo_attuale
+        # controllo se l'IP che cerca di connettersi supera il limite di connessioni per secondo
+        if ip_source in IP_TRACKER: 
+            if tempo_attuale - ultimo_accesso < RATE_LIMIT: 
+                print(f"[!] Connessione da {ip_source} rifiutata per rate limiting.")
+                log_allarme(ip_source, "N/A", "N/A", "Rate limiting")  # Log dell'evento di rate limiting
                 client_socket.sendall(f"[!] Connessione rifiutata per rate limiting.".encode('utf-8'))
                 return
-        IP_TRACKER[ip_simulato] = tempo_attuale
+                    
+        json_data = json.loads(data) 
+        # type checking anti fuzzing: controllo che il pacchetto ricevuto sia un dizionario JSON valido
+        if not isinstance(json_data, dict):
+            print(f"[!] Pacchetto JSON non valido ricevuto da {ip_source}. Ignorato.")
+            log_allarme(ip_source, "N/A", "N/A", "Pacchetto JSON non valido")  # Log dell'evento di pacchetto JSON non valido
+            client_socket.sendall(f"[!] ERRORE: PACCHETTO_JSON_NON_VALIDO".encode('utf-8'))
+            return
+        # estraggo i campi dal JSON ricevuto, con valori di default se non presenti
+        mittente = str(json_data.get("mittente", "Sconosciuto")).strip().upper()
+        azione = str(json_data.get("azione", "NESSUNA")).strip().upper()
+        target = str(json_data.get("target", "Sconosciuto")).strip().upper()
+        valore = json_data.get("valore", "0")
+        try:
+            valore = float(valore)
+        except (ValueError, TypeError):
+            print(f"[!] Valore non numerico ricevuto da {ip_source}. Ignorato.")
+            log_allarme(ip_source, target, "Fuzzing Type", "Il parametro valore non è un numero")
+            client_socket.sendall(f"[!] ERRORE: VALORE_NON_NUMERICO".encode('utf-8'))
+            return
+  
+
+        if len(mittente) > 50 or len(target) > 50:
+            print(f"[!] Pacchetto con mittente o target troppo lungo ricevuto da {ip_source}. Ignorato.")
+            log_allarme(ip_source, target, azione, "Pacchetto con mittente o target troppo lungo")
+            client_socket.sendall(f"[!] ERRORE: MITTENTE_O_TARGET_TROPPO_LUNGO".encode('utf-8'))
+            return
+        
  
         # serie di stateful inspection per controllare se il pacchetto ricevuto è malevolo o meno
-        if is_ip_banned(ip_simulato): # controllo su ip bannati
-            print(f"[!] Connessione da IP bannato: {ip_simulato}. Connessione terminata.")
-            log_allarme(ip_simulato, target, azione, "IP bannato") # aggiunge al database l'ingresso malevolo
-            client_socket.sendall(f"[!] Connessione da IP bannato: {ip_simulato}. Connessione terminata.".encode('utf-8'))
+        if is_ip_banned(ip_source): # controllo su ip bannati
+            print(f"[!] Connessione da IP bannato: {ip_source}. Connessione terminata.")
+            log_allarme(ip_source, target, azione, "IP bannato") # aggiunge al database l'ingresso malevolo
+            client_socket.sendall(f"[!] Connessione da IP bannato: {ip_source}. Connessione terminata.".encode('utf-8'))
             return
+        
+        esito_hmac, messaggio_errore_hmac = is_pacchetto_autentico(json_data)
+        if not esito_hmac:
+            print(f"[!] Blocco Crittografico da {ip_source}: {messaggio_errore_hmac}")
+            log_allarme(ip_source, target, azione, f"Fallimento HMAC: {messaggio_errore_hmac}")
+            client_socket.sendall(f"[!] Connessione terminata: {messaggio_errore_hmac}".encode('utf-8'))
+            return
+        
         if is_payload_malicious(valore): # controllo su payload malevoli
-            print(f"[!] Payload malevolo rilevato da {ip_simulato}. Connessione terminata.")
-            log_allarme(ip_simulato, target, azione, "Payload malevolo")
-            client_socket.sendall(f"[!] Payload malevolo rilevato da {ip_simulato}. Connessione terminata.".encode('utf-8'))
+            print(f"[!] Payload malevolo rilevato da {ip_source}. Connessione terminata.")
+            log_allarme(ip_source, target, azione, "Payload malevolo")
+            client_socket.sendall(f"[!] Payload malevolo rilevato da {ip_source}. Connessione terminata.".encode('utf-8'))
             return
+        
         if not valida_regola_fisica(azione, valore): # controllo su valori fisici superati
             print(f"[!] BLOCCO ANOMALIA: Violazione limiti fisici (Azione: {azione}, Valore: {valore}).")
-            log_allarme(ip_simulato, target, azione, "Violazione limiti fisici")
+            log_allarme(ip_source, target, azione, "Violazione limiti fisici")
             client_socket.sendall(f"[!] BLOCCO ANOMALIA: Violazione limiti fisici (Azione: {azione}, Valore: {valore}).".encode('utf-8'))
             return
+        
         if is_azione_bannata(azione, target): # controllo su azioni bannate
             print(f"[!] Tentativo di azione bannata (Azione: {azione}, Target: {target}).") 
-            log_allarme(ip_simulato, target, azione, "Azione bannata") 
+            log_allarme(ip_source, target, azione, "Azione bannata") 
             client_socket.sendall(f"[!] Tentativo di azione bannata (Azione: {azione}, Target: {target}).".encode('utf-8'))
             return
+        
         print(f"[+] Pacchetto da {mittente} sicuro. Aperta connessione verso il plant.")
-        # creo un nuovo socket per parlare con il plant sulla porta 5001
+        
+        # costruisco un nuovo json ridotto con solo i campi necessari per il plant
+        dati_ridotti= {
+            "target": target,
+            "azione": azione,
+            "valore": valore
+        }
+        dati_per_plant = json.dumps(dati_ridotti).encode('utf-8')
         simulatore_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) 
         simulatore_socket.connect((HOST, PORT + 1))
-        # inoltro i dati originali
-        simulatore_socket.sendall(dati_grezzi)
-        # attendo risposta dal plant
+        # inoltro il JSON pulito 
+        simulatore_socket.sendall(dati_per_plant)
         risposta_simulatore = simulatore_socket.recv(1024)
-        # chiudo il socket 
         simulatore_socket.close()
 
         # rimando la risposta indetro al mittente che ha iniziato la comunicazione
@@ -76,9 +114,11 @@ def connection_handler(client_socket, address):
     except json.JSONDecodeError:
         #  catturo pacchetti non-json e li ignoro
         print(f"[!] Pacchetto non JSON ricevuto da {ip_source}. Ignorato.")
+        log_allarme(ip_source, "N/A", "N/A", "Pacchetto non JSON")  # Log dell'evento di pacchetto non JSON
 
     except Exception as e:
         print(f"[!] Errore durante la gestione della connessione da {ip_source}: {e}")
+        log_allarme(ip_source, "N/A", "N/A", f"Errore interno: {e}")  # Log dell'errore interno
 
     finally:
         client_socket.close()
