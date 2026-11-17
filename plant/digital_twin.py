@@ -1,10 +1,12 @@
 import networkx as nx 
+import json
 
 CHIUSO = "CHIUSO"
 APERTO = "APERTO"
-CHIUDI = "CHIUDI"
-APRI = "APRI"
-AZIONI = {APRI : APERTO, CHIUDI : CHIUSO}
+
+TRIP_BREAKER = "TRIP_BREAKER"
+AZIONI = {TRIP_BREAKER}
+VALORI_BREAKER = {"0": CHIUSO, "1": APERTO}
 
 class SmartGridTwin:
     def __init__(self):
@@ -46,25 +48,41 @@ class SmartGridTwin:
             return False
 
     def esegui_comando(self, cmd):
-        nodo = cmd.get("nodo")
+        target = cmd.get("target")
         azione = cmd.get("azione")
-        if not isinstance(nodo, str) or not isinstance(azione, str):
+        valore = cmd.get("valore")
+        if not isinstance(target, str) or not isinstance(azione, str) or not isinstance(valore, str):
             return {"status": "ERROR", "codice_errore": "CAMPO_MANCANTE"}
         if azione not in AZIONI:
             return {"status": "ERROR", "codice_errore": "AZIONE_SCONOSCIUTA"}
-        if nodo not in self.grid.nodes:
+        if valore not in VALORI_BREAKER:
+            return {"status": "ERROR", "codice_errore": "VALORE_NON_VALIDO"}
+        if target not in self.grid.nodes:
             return {"status": "ERROR", "codice_errore": "NODO_INESISTENTE"}
-        self.grid.nodes[nodo]["stato"] = AZIONI[azione]
+        self.grid.nodes[target]["stato"] = VALORI_BREAKER[valore]
         return {"status": "SUCCESS", "ospedale_alimentato": self.ospedale_alimentato(), "stato_nodi": self.stato_nodi()}
-
+    
+    def processa_json(self, testo):
+        try:
+            cmd = json.loads(testo)
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            return {"status": "ERROR", "codice_errore": "JSON_NON_VALIDO"}
+        if not isinstance(cmd, dict):
+            return {"status": "ERROR", "codice_errore": "JSON_NON_VALIDO"}
+        return self.esegui_comando(cmd)  
+      
 if __name__ == "__main__":
     twin = SmartGridTwin()
     print("Stato iniziale dei nodi:", twin.stato_nodi())
     print("Sono presenti", twin.grid.number_of_nodes(), "nodi e", twin.grid.number_of_edges(), "archi nella rete.")
 
-    print(twin.esegui_comando({"nodo": "sottostazione_nord", "azione": "APRI"}))
-    print(twin.esegui_comando({"nodo": "sottostazione_sud", "azione": "APRI"}))
-    print(twin.esegui_comando({"nodo": "sottostazione_sud", "azione": "CHIUDI"}))
-    print(twin.esegui_comando({"nodo": "ospedale"}))
-    print(twin.esegui_comando({"nodo": "ospedale", "azione": "PIPPO"}))
-    print(twin.esegui_comando({"nodo": "pippo", "azione": "APRI"}))
+    print(twin.esegui_comando({"target": "sottostazione_nord", "azione": "TRIP_BREAKER", "valore": "1"}))
+    print(twin.esegui_comando({"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "1"}))
+    print(twin.esegui_comando({"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "0"}))
+    print(twin.esegui_comando({"target": "ospedale", "azione": "PIPPO", "valore": "1"}))
+    print(twin.esegui_comando({"target": "ospedale", "azione": "TRIP_BREAKER", "valore": "7"}))
+    print(twin.esegui_comando({"target": "ospedale", "azione": "TRIP_BREAKER", "valore": ["1"]}))
+    print(twin.esegui_comando({"target": "pippo", "azione": "TRIP_BREAKER", "valore": "1"}))
+
+    print(twin.processa_json('{"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "1"}'))
+    print(twin.processa_json('{"mittente": "x", "target": "ospedale", "azione": "TRIP_BREAKER", "valore": "0", "seq": 1}'))
