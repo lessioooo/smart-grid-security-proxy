@@ -78,34 +78,37 @@ class SmartGridTwin:
             return {"status": "ERROR", "codice_errore": "JSON_NON_VALIDO"}
         return self.esegui_comando(cmd)  
 
-    def gestisci_client(conn, addr, twin):
-        with conn: 
-            conn.settimeout(5.0)  #Se per 5 secondi sulla connessione stabilita non succede niente solleva eccezione
-            try:
-                dati = conn.recv(4096) #Può ricevere un massimo di 4096 byte
-                testo = dati.decode("utf-8", errors="replace") #Decodifica byte -> stringa; i byte illeggibili vengono sostituiti con carattere di sostituzione
-                risposta = twin.processa_json(testo) #Controlla che la stringa sia un json valido; restituisce sempre un dizionario python
-            except socket.timeout:
-                risposta = {"status": "ERROR", "codice_errore": "TIMEOUT"}
-            except OSError: #Cattura errori di connessione, ad esempio se il client chiude la connessione prima che il server abbia finito di leggere i dati
-                return
-            try:
-                conn.sendall(json.dumps(risposta).encode("utf-8")) #Codifica inversa: dizionario -> testo json -> byte; sendall invia tutti i byte al client
-            except OSError:
-                pass  # Se la connessione è stata chiusa dal client, ignora l'errore
-      
-if __name__ == "__main__":
+def gestisci_client(conn, addr, twin):
+    with conn: 
+        conn.settimeout(5.0)  #Se per 5 secondi sulla connessione stabilita non succede niente solleva eccezione
+        try:
+            dati = conn.recv(4096) #Può ricevere un massimo di 4096 byte
+            testo = dati.decode("utf-8", errors="replace") #Decodifica byte -> stringa; i byte illeggibili vengono sostituiti con carattere di sostituzione
+            risposta = twin.processa_json(testo) #Controlla che la stringa sia un json valido; restituisce sempre un dizionario python
+        except socket.timeout:
+            risposta = {"status": "ERROR", "codice_errore": "TIMEOUT"}
+        except OSError: #Cattura errori di connessione, ad esempio se il client chiude la connessione prima che il server abbia finito di leggere i dati
+            return
+        try:
+            conn.sendall(json.dumps(risposta).encode("utf-8")) #Codifica inversa: dizionario -> testo json -> byte; sendall invia tutti i byte al client
+        except OSError:
+            pass  # Se la connessione è stata chiusa dal client, ignora l'errore
+
+def avvia_server():
     twin = SmartGridTwin()
-    print("Stato iniziale dei nodi:", twin.stato_nodi())
-    print("Sono presenti", twin.grid.number_of_nodes(), "nodi e", twin.grid.number_of_edges(), "archi nella rete.")
-
-    print(twin.esegui_comando({"target": "sottostazione_nord", "azione": "TRIP_BREAKER", "valore": "1"}))
-    print(twin.esegui_comando({"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "1"}))
-    print(twin.esegui_comando({"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "0"}))
-    print(twin.esegui_comando({"target": "ospedale", "azione": "PIPPO", "valore": "1"}))
-    print(twin.esegui_comando({"target": "ospedale", "azione": "TRIP_BREAKER", "valore": "7"}))
-    print(twin.esegui_comando({"target": "ospedale", "azione": "TRIP_BREAKER", "valore": ["1"]}))
-    print(twin.esegui_comando({"target": "pippo", "azione": "TRIP_BREAKER", "valore": "1"}))
-
-    print(twin.processa_json('{"target": "sottostazione_sud", "azione": "TRIP_BREAKER", "valore": "1"}'))
-    print(twin.processa_json('{"mittente": "x", "target": "ospedale", "azione": "TRIP_BREAKER", "valore": "0", "seq": 1}'))
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Questa riga crea un socket che funziona su reti ipV4 (AF_INET) tramite il protocollo TCP (SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #Permette di riavviare il server subito dopo averlo fermato
+    server.bind((HOST, PORTA)) #Assegna al socket host e porta (5001)
+    server.listen() #Da qui il server si mette in ascolto di connessioni in arrivo e le mette in coda
+    print("Sportello aperto sulla porta", PORTA)
+    while True: #Server continua all'infinito 
+        conn, addr = server.accept() #accept() blocca l'esecuzione finché non arriva una connessione; quando arriva, restituisce un nuovo socket (conn) e l'indirizzo del client (addr)
+        print("Connessione da", addr)
+        thread = threading.Thread(      #Crea un nuovo thread, un ramo che permette di gestire la connessione con il client, in parallelo ad altre connessioni; in questo modo il server può gestire più client contemporaneamente
+            target = gestisci_client, 
+            args = (conn, addr, twin),
+            daemon = True  # Thread demone: si chiude automaticamente quando il programma principale termina
+        )
+        thread.start() #Fa partire il thread
+if __name__ == "__main__":
+   avvia_server()
