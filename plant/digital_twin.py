@@ -2,6 +2,7 @@ import networkx as nx
 import json
 import socket
 import threading
+import os
 
 CHIUSO = "CHIUSO"
 APERTO = "APERTO"
@@ -12,6 +13,9 @@ VALORI_BREAKER = {"0": CHIUSO, "1": APERTO}
 
 HOST = "0.0.0.0"
 PORTA = 5001
+
+#Legge dalla variabile d'ambiente IP_CONSENTITI l'elenco degli IP ammessi, se la variabile non esiste, ammette solo la macchina locale ("127.0.0.1").
+IP_CONSENTITI = set(os.environ.get("IP_CONSENTITI", "127.0.0.1").split(",")) 
 
 class SmartGridTwin:
     def __init__(self):
@@ -65,7 +69,7 @@ class SmartGridTwin:
             return {"status": "ERROR", "codice_errore": "VALORE_NON_VALIDO"}
         if target not in self.grid.nodes:
             return {"status": "ERROR", "codice_errore": "NODO_INESISTENTE"}
-        with self.lock:  # Acquisizione del lock per garantire thread safety
+        with self.lock:  # Acquisizione del lock per garantire thread safety: garantisce che un solo thread alla volta possa modificare lo stato dei nodi
             self.grid.nodes[target]["stato"] = VALORI_BREAKER[valore]
             return {"status": "SUCCESS", "ospedale_alimentato": self.ospedale_alimentato(), "stato_nodi": self.stato_nodi()}
     
@@ -104,11 +108,16 @@ def avvia_server():
     while True: #Server continua all'infinito 
         conn, addr = server.accept() #accept() blocca l'esecuzione finché non arriva una connessione; quando arriva, restituisce un nuovo socket (conn) e l'indirizzo del client (addr)
         print("Connessione da", addr)
+        if addr[0] not in IP_CONSENTITI: #Se l'IP del client non è nella lista degli IP consentiti, chiude la connessione
+            print("Connessione rifiutata da", addr)
+            conn.close()
+            continue
         thread = threading.Thread(      #Crea un nuovo thread, un ramo che permette di gestire la connessione con il client, in parallelo ad altre connessioni; in questo modo il server può gestire più client contemporaneamente
             target = gestisci_client, 
             args = (conn, addr, twin),
             daemon = True  # Thread demone: si chiude automaticamente quando il programma principale termina
         )
         thread.start() #Fa partire il thread
+
 if __name__ == "__main__":
    avvia_server()

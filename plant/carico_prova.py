@@ -3,8 +3,8 @@ import json
 import threading
 
 
-def invia(target, valore):
-    """Manda un comando al twin e restituisce la risposta come dizionario."""
+def invia(target, valore): 
+    #Manda un comando al twin e restituisce la risposta come dizionario
     comando = {"target": target, "azione": "TRIP_BREAKER", "valore": valore}
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
         client.connect(("127.0.0.1", 5001))
