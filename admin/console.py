@@ -1,4 +1,5 @@
 import json
+import socket
 
 # Comandi disponibili nel menu.
 # Bisogna sostituire i valori di "target" con i nomi veri usati dal plant e dal proxy.
@@ -25,6 +26,18 @@ def costruisci_comando(scelta):
     }
 
 
+def invia_comando(comando, host="127.0.0.1", porta=5000):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((host, porta))
+            messaggio = json.dumps(comando) + "\n"
+            s.sendall(messaggio.encode("utf-8"))
+            risposta = s.recv(4096).decode("utf-8")
+            return risposta.strip()
+    except ConnectionRefusedError:
+        return "ERRORE: impossibile connettersi al proxy (è acceso?)"
+
+
 def main():
     while True:
         mostra_menu()
@@ -39,6 +52,8 @@ def main():
 
         comando = costruisci_comando(scelta)
         print("JSON da inviare:", json.dumps(comando))
+        risposta = invia_comando(comando)
+        print("Risposta del proxy:", risposta)
 
 
 if __name__ == "__main__":
